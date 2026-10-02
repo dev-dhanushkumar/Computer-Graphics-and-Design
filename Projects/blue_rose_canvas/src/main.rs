@@ -12,6 +12,8 @@ struct RenderState<'a> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
+    time_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup,
 }
 
 impl<'a> RenderState<'a> {
@@ -50,9 +52,48 @@ impl<'a> RenderState<'a> {
 
         surface.configure(&device, &config);
 
+        // 1. Create the uniform Buffer for time
+        let time_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Time Buffer"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // 2. define the Bind Group Layout
+        let time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Time Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // 3. Bind the buffer to the layout
+        let time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Time Bind Group"),
+            layout: &time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: time_buffer.as_entire_binding(),
+            }],
+        });
+
         let shader = device.create_shader_module(include_wgsl!("./shader.wgsl"));
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor::default());
+
+        // 4. Attach layout to the pipeline
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Pipeline Layout"),
+            bind_group_layouts: &[Some(&time_bind_group_layout)], // Wrapped in Some()
+            immediate_size: 0, // push_constant_ranges was removed, just delete the line
+        });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("render Pipeline"),
@@ -87,10 +128,17 @@ impl<'a> RenderState<'a> {
             queue,
             config,
             render_pipeline,
+            time_buffer,
+            time_bind_group,
         }
     }
 
-    fn render(&mut self) {
+    fn render(&mut self, time_seconds: f32) {
+        // Write the elapsed time to the GPU bridge
+        let mut time_bytes = [0u8; 16];
+        time_bytes[0..4].copy_from_slice(&time_seconds.to_ne_bytes());
+        self.queue.write_buffer(&self.time_buffer, 0, &time_bytes);
+
         let output = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
@@ -133,6 +181,7 @@ impl<'a> RenderState<'a> {
             });
             render_pass.set_pipeline(&self.render_pipeline);
             // Draw 3 verticals to triangle our full screen triangle trick
+            render_pass.set_bind_group(0, &self.time_bind_group, &[]);
             render_pass.draw(0..3, 0..1);
         }
 
@@ -146,6 +195,7 @@ struct App<'a> {
     // we use the Arch to share the window handle safely, which wgpu will require later
     window: Option<Arc<Window>>,
     render_state: Option<RenderState<'a>>,
+    start_time: Option<std::time::Instant>,
 }
 
 impl<'a> ApplicationHandler for App<'a> {
@@ -153,10 +203,13 @@ impl<'a> ApplicationHandler for App<'a> {
         if self.window.is_none() {
             let window = Arc::new(
                 event_loop
-                    .create_window(Window::default_attributes())
+                    .create_window(
+                        Window::default_attributes().with_title("Animated Shader Canvas"),
+                    )
                     .unwrap(),
             );
             self.window = Some(window.clone());
+            self.start_time = Some(std::time::Instant::now());
 
             let state = pollster::block_on(RenderState::new(window));
             self.render_state = Some(state);
@@ -171,7 +224,9 @@ impl<'a> ApplicationHandler for App<'a> {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
                 if let Some(state) = &mut self.render_state {
-                    state.render();
+                    let time = self.start_time.unwrap().elapsed().as_secs_f32();
+                    state.render(time);
+                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
             _ => (),
