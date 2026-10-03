@@ -22,6 +22,19 @@ cd Project/blue_rose_canvas
 cargo run
 ```
 
+## Phases Of design pictures:
+
+### Blue rose version 0:
+<img width="1079" height="782" alt="Screenshot From 2026-10-02 21-43-24" src="https://github.com/user-attachments/assets/c3cf6fd4-afb3-4448-8008-f36f1f135c92" />
+
+### Blue rose version 1:
+<img width="923" height="722" alt="Screenshot From 2026-10-02 21-53-01" src="https://github.com/user-attachments/assets/b095b7ba-e773-4887-8542-5597cfc7d368" />
+
+### Blue rose version 2: (Adding animation and time frame)
+https://github.com/user-attachments/assets/94203738-48b2-4754-a34f-b913c27786b8
+
+
+
 ## Project Architecture
 
 - `src/main.rs`: Contains the `winit` event loop and the `wgpu` initialization. It sets up the logical device, configures the sRGB surface, establishes the 16-byte uniform buffer for the time variable, and submits the render passes frame-by-frame.
